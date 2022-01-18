@@ -5,6 +5,7 @@ defmodule Jetdb do
   def open do
     data_file = "testdata/data/nwind.mdb"
     {:ok, _page_count, _jetdb_version, stream} = open(data_file)
-    _schema = read_schema(stream)
+    schema = read_schema(stream)
+    IO.inspect(schema)
   end
 end

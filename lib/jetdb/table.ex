@@ -81,7 +81,7 @@ defmodule Jetdb.Table do
         a ++ [name: b]
       end
 
-    IO.inspect(columns)
+    # IO.inspect(columns)
 
     index_bytes = 39 * num_real_idx
     <<_::size(index_bytes)-bytes, rest::binary>> = col_names
@@ -104,7 +104,9 @@ defmodule Jetdb.Table do
       end
 
     # iterate if pages_col_num != 65535
-    parsed_free_pages = parse_free_pages(rest)
+    # IO.inspect(rest)
+    # parsed_free_pages = parse_free_pages(rest)
+    parsed_free_pages = []
 
     [
       used_pages_page: used_pages_page,
@@ -164,7 +166,7 @@ defmodule Jetdb.Table do
     >> =
       usage_map
 
-    IO.puts("first_page_applies: #{first_page_applies}")
+    # IO.puts("first_page_applies: #{first_page_applies}")
 
     <<
       _::size(1)-bytes,
