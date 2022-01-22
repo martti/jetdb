@@ -18,18 +18,19 @@ defmodule Jetdb.Schema do
     ]
   end
 
-  def read_schema(stream) do
+  def read_schema(connection) do
     # schema is page 2
-    schema_page = List.first(Enum.slice(stream, 2, 1))
+    schema_page = List.first(Enum.slice(connection.data_file, 2, 1))
     tdef = parse_tdef(schema_page)
-    used_pages_map = used_pages_map(stream, tdef[:used_pages_page])
-    rows = read_rows(stream, tdef, used_pages_map)
+    used_pages_map = used_pages_map(connection.data_file, tdef[:used_pages_page])
+    rows = read_rows(connection.data_file, tdef, used_pages_map)
     tables = Enum.filter(rows, &is_user_table/1) |> Enum.map(&parse_columns/1)
-    IO.inspect(tables)
-    Enum.map(tables, fn table ->
-      table_page = List.first(Enum.slice(stream, Enum.at(table, 0), 1))
+    # IO.inspect(tables)
+    schema = Enum.map(tables, fn table ->
+      table_page = List.first(Enum.slice(connection.data_file, Enum.at(table, 0), 1))
       tdef = parse_tdef(table_page)
       [table, tdef]
     end)
+    %Jetdb.Connection{ connection | schema: schema}
   end
 end

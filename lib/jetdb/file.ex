@@ -25,6 +25,11 @@ defmodule Jetdb.File do
     {:ok, file_size} = check_file_length(filename, page_size)
 
     page_count = file_size / (page_size * 1024)
-    {:ok, page_count, jetdb_version, File.stream!(filename, [], page_size * 1024)}
+    {:ok, %Jetdb.Connection{
+      data_file: File.stream!(filename, [], page_size * 1024),
+      page_count: page_count,
+      page_size: page_size * 1024,
+      version: jetdb_version,
+    }}
   end
 end

@@ -1,11 +1,11 @@
 defmodule Jetdb do
-  import Jetdb.File
   import Jetdb.Schema
 
   def open do
     data_file = "testdata/data/nwind.mdb"
-    {:ok, _page_count, _jetdb_version, stream} = open(data_file)
-    schema = read_schema(stream)
-    IO.inspect(schema)
+    {:ok, connection} = Jetdb.File.open(data_file)
+    connection = read_schema(connection)
+    orders = Jetdb.Query.query(connection, :select, "Orders", ["OrderID", "ShipName"])
+    Enum.map(orders, &Enum.at(&1, 1))
   end
 end
