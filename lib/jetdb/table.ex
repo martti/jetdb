@@ -278,13 +278,16 @@ defmodule Jetdb.Table do
 
   def extract_bytes_from_page(data_file, pages) do
     # list of pages containing maps
-    pages = for(<<page::size(32)-unsigned-integer-little <- pages>>, do: page) |> Enum.filter(&(&1 > 0))
-
-    Enum.flat_map(pages, fn page_page ->
-      usage_map = Enum.at(data_file, page_page)
-      <<_::size(4)-bytes, bitmap::binary >> = usage_map
-      extract_bytes(bitmap)
-    end)
+    pages = for(<<page::size(32)-unsigned-integer-little <- pages>>, do: page)
+    Enum.with_index(pages, fn page_page, index ->
+      pages_in_page = (data_file.page_size - 4) * 8
+      page_start = index * pages_in_page
+      if page_page > 0 do
+        usage_map = Enum.at(data_file, page_page)
+        <<_::size(4)-bytes, bitmap::binary >> = usage_map
+        extract_bytes(bitmap) |> Enum.map(&(&1 + page_start))
+      end
+    end) |> Enum.filter(&(!is_nil(&1))) |> List.flatten()
   end
 
   # these should probably also handle when used_pages_row from tdef is not 0?
