@@ -8,6 +8,7 @@ defmodule Jetdb.Query do
 
   defp select(conn, table, columns) do
     schema_table = find_table(conn, table)
+
     if is_nil(schema_table) do
       {:error, "table #{table} not found"}
     else
@@ -23,6 +24,7 @@ defmodule Jetdb.Query do
     case type do
       :select ->
         select(conn, table, columns)
+
       _ ->
         {:error, "unknown query type"}
     end

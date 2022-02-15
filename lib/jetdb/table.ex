@@ -1,7 +1,8 @@
 defmodule Jetdb.Table do
   import Bitwise
 
-  defp parse_cols(3,
+  defp parse_cols(
+         3,
          <<
            len::size(8)-unsigned-integer-little,
            rest::binary
@@ -21,7 +22,8 @@ defmodule Jetdb.Table do
     []
   end
 
-  defp parse_cols(4,
+  defp parse_cols(
+         4,
          <<
            len::size(16)-unsigned-integer-little,
            rest::binary
@@ -45,7 +47,8 @@ defmodule Jetdb.Table do
   # jetdb3
   def parse_tdef(%Jetdb.File{version: 3}, <<
         0x02,
-        _::size(8), # unknown
+        # unknown
+        _::size(8),
         "VC",
         _next_page::size(32)-unsigned-integer-little,
         _tdef_len::size(32)-unsigned-integer-little,
@@ -140,30 +143,33 @@ defmodule Jetdb.Table do
 
   # jetdb4
   def parse_tdef(%Jetdb.File{version: 4}, <<
-    0x02,
-    _::size(8), # unknown
-    _free_space_in_page::size(16)-unsigned-integer-little,
-    _next_page::size(32)-unsigned-integer-little,
-    _tdef_len::size(32)-unsigned-integer-little,
-    _::size(32)-unsigned-integer-little, # unknown
-    _num_rows::size(32)-unsigned-integer-little,
-    _auto_number::size(32)-unsigned-integer-little,
-    _auto_number_flag::size(8)-unsigned-integer-little,
-    _::size(24)-unsigned-integer-little, # unknown
-    _auto_number_value::size(32)-unsigned-integer-little,
-    _::size(64)-unsigned-integer-little, # unknown
-    _table_type::size(8)-unsigned-integer-little,
-    _max_cols::size(16)-unsigned-integer-little,
-    _num_var_cols::size(16)-unsigned-integer-little,
-    num_cols::size(16)-unsigned-integer-little,
-    num_idx::size(32)-unsigned-integer-little,
-    num_real_idx::size(32)-unsigned-integer-little,
-    used_pages_row::size(8)-unsigned-integer-little,
-    used_pages_page::size(24)-unsigned-integer-little,
-    _free_pages::size(32)-unsigned-integer-little,
-    rest::binary
-  >>) do
-
+        0x02,
+        # unknown
+        _::size(8),
+        _free_space_in_page::size(16)-unsigned-integer-little,
+        _next_page::size(32)-unsigned-integer-little,
+        _tdef_len::size(32)-unsigned-integer-little,
+        # unknown
+        _::size(32)-unsigned-integer-little,
+        _num_rows::size(32)-unsigned-integer-little,
+        _auto_number::size(32)-unsigned-integer-little,
+        _auto_number_flag::size(8)-unsigned-integer-little,
+        # unknown
+        _::size(24)-unsigned-integer-little,
+        _auto_number_value::size(32)-unsigned-integer-little,
+        # unknown
+        _::size(64)-unsigned-integer-little,
+        _table_type::size(8)-unsigned-integer-little,
+        _max_cols::size(16)-unsigned-integer-little,
+        _num_var_cols::size(16)-unsigned-integer-little,
+        num_cols::size(16)-unsigned-integer-little,
+        num_idx::size(32)-unsigned-integer-little,
+        num_real_idx::size(32)-unsigned-integer-little,
+        used_pages_row::size(8)-unsigned-integer-little,
+        used_pages_page::size(24)-unsigned-integer-little,
+        _free_pages::size(32)-unsigned-integer-little,
+        rest::binary
+      >>) do
     indexes =
       for <<_::size(32)-unsigned-integer-little,
             num_idx_rows_maybe::size(32)-unsigned-integer-little,
@@ -173,7 +179,8 @@ defmodule Jetdb.Table do
     column_props =
       for <<
             col_type::size(8),
-            _::size(32)-unsigned-integer-little, # unknown
+            # unknown
+            _::size(32)-unsigned-integer-little,
             col_number::size(16)-unsigned-integer-little,
             offset_v::size(16)-unsigned-integer-little,
             _col_num::size(16)-unsigned-integer-little,
@@ -181,7 +188,8 @@ defmodule Jetdb.Table do
             _misc_ext::size(16)-unsigned-integer-little,
             bitmask::size(8)-unsigned-integer-little,
             _misc_flags::size(8)-unsigned-integer-little,
-            _::size(32)-unsigned-integer-little, # unknown
+            # unknown
+            _::size(32)-unsigned-integer-little,
             offset_f::size(16)-unsigned-integer-little,
             col_len::size(16)-unsigned-integer-little <-
               binary_part(rest, num_real_idx * 12, num_cols * 25)
@@ -196,8 +204,7 @@ defmodule Jetdb.Table do
             nullable: (bitmask &&& 0x02) == 2
           ]
 
-
-          sizex = num_real_idx * 12 + num_cols * 25
+    sizex = num_real_idx * 12 + num_cols * 25
     <<_::size(sizex)-binary, col_names::binary>> = rest
 
     # IO.inspect(col_names)
@@ -279,15 +286,19 @@ defmodule Jetdb.Table do
   def extract_bytes_from_page(data_file, pages) do
     # list of pages containing maps
     pages = for(<<page::size(32)-unsigned-integer-little <- pages>>, do: page)
+
     Enum.with_index(pages, fn page_page, index ->
       pages_in_page = (data_file.page_size - 4) * 8
       page_start = index * pages_in_page
+
       if page_page > 0 do
         usage_map = Enum.at(data_file, page_page)
-        <<_::size(4)-bytes, bitmap::binary >> = usage_map
+        <<_::size(4)-bytes, bitmap::binary>> = usage_map
         extract_bytes(bitmap) |> Enum.map(&(&1 + page_start))
       end
-    end) |> Enum.filter(&(!is_nil(&1))) |> List.flatten()
+    end)
+    |> Enum.filter(&(!is_nil(&1)))
+    |> List.flatten()
   end
 
   # these should probably also handle when used_pages_row from tdef is not 0?
@@ -298,23 +309,20 @@ defmodule Jetdb.Table do
       _::size(10)-bytes,
       first_page_applies::size(16)-unsigned-integer-little,
       _::binary
-    >> =
-      usage_map
+    >> = usage_map
 
     <<
       _::size(first_page_applies)-bytes,
       bitmap::binary
-    >> =
-      usage_map
+    >> = usage_map
 
     <<
       map_type::size(8)-unsigned-integer-little,
       bitmap::binary
-    >> =
-      bitmap
+    >> = bitmap
 
     if map_type == 0 do
-      <<page_start::size(32)-unsigned-integer-little, bitmap::binary >> = bitmap
+      <<page_start::size(32)-unsigned-integer-little, bitmap::binary>> = bitmap
       extract_bytes(bitmap) |> Enum.map(&(&1 + page_start))
     else
       # map_type 1
@@ -329,23 +337,20 @@ defmodule Jetdb.Table do
       _::size(14)-bytes,
       first_page_applies::size(16)-unsigned-integer-little,
       _::binary
-    >> =
-      usage_map
+    >> = usage_map
 
     <<
       _::size(first_page_applies)-bytes,
       bitmap::binary
-    >> =
-      usage_map
+    >> = usage_map
 
     <<
       map_type::size(8)-unsigned-integer-little,
       bitmap::binary
-    >> =
-      bitmap
+    >> = bitmap
 
     if map_type == 0 do
-      <<page_start::size(32)-unsigned-integer-little, bitmap::binary >> = bitmap
+      <<page_start::size(32)-unsigned-integer-little, bitmap::binary>> = bitmap
       extract_bytes(bitmap) |> Enum.map(&(&1 + page_start))
     else
       # map_type 1
