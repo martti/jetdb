@@ -33,7 +33,7 @@ defmodule Jetdb.Table do
        when cols > 0 do
     <<col::size(len)-bytes, rest::binary>> = rest
     # IO.puts(:iconv.convert("ucs-2le", "utf-8", col))
-    [:iconv.convert("ucs-2le", "utf-8", col) | parse_cols(4, rest, cols - 1)]
+    [{len, :iconv.convert("ucs-2le", "utf-8", col)} | parse_cols(4, rest, cols - 1)]
   end
 
   defp parse_cols(4, <<_::binary>>, 0) do
@@ -209,44 +209,108 @@ defmodule Jetdb.Table do
 
     # IO.inspect(col_names)
     column_names = parse_cols(4, col_names, num_cols)
-    # IO.inspect(column_names)
 
     columns =
       for {a, b} <- Enum.zip(column_props, column_names) do
-        a ++ [name: b]
+        a ++ [name: elem(b, 1)]
       end
 
-    # IO.inspect(columns)
+    # 2 + column length for each column
+    columns_length = Enum.reduce(column_names, 0, &(&2 + elem(&1, 0) + 2))
+    <<_::size(columns_length)-bytes, rest::binary>> = col_names
 
-    index_bytes = 39 * num_real_idx
-    <<_::size(index_bytes)-bytes, rest::binary>> = col_names
+    # real index block 30 + 22 for each num_real_index
+    index_bytes = (30 + 22) * num_real_idx
+    <<real_index_block::size(index_bytes)-bytes, rest::binary>> = rest
+    # IO.puts(Hexdump.to_string(real_index_block))
 
-    # IO.puts("num_idx: #{num_idx}")
-    index_bytes = 20 * num_idx
-    <<_::size(index_bytes)-bytes, _rest::binary>> = rest
+    # physical indexes
+    real_indexes =
+      for <<
+        _::size(4)-bytes,
+        column_block::size(30)-bytes,
+        index_block::size(18)-bytes <- real_index_block
+      >> do
+        cols = for <<
+          col_num::size(16)-unsigned-integer-little,
+          col_order::size(8)-unsigned-integer-little <- column_block
+        >> do
+          [col_num: col_num, col_order: col_order]
+        end
+        <<
+          used_pages_row::size(8)-unsigned-integer-little,
+          used_pages_page::size(24)-unsigned-integer-little,
+          first_dp::size(32)-unsigned-integer-little,
+          flags::size(8)-unsigned-integer-little,
+          _::size(9)-bytes
+        >> = index_block
+        [
+        used_pages_page: used_pages_page,
+        used_pages_row: used_pages_row,
+        first_dp: first_dp,
+        flags: flags,
+        cols: cols,
+        unique: (flags &&& 0x01) == 1,
+        ignore_nuls: (flags &&& 0x02) == 2,
+        required: (flags &&& 0x08) == 8
+        ]
+    end
 
-    # rest =
-    #   if num_idx > 0 do
-    #     idx_names = parse_cols(4, rest, num_idx)
-    #     # IO.inspect(idx_names)
-    #     total = Enum.reduce(idx_names, 0, fn col, acc -> 1 + byte_size(col) + acc end)
-    #     # end
-    #     # IO.puts("total #{total}")
-    #     <<_::size(total)-bytes, rest::binary>> = rest
-    #     rest
-    #   else
-    #     rest
-    #   end
+    # index block 28 for each num_idx
+    index_bytes = 28 * num_idx
+    <<index_block::size(index_bytes)-bytes, rest::binary>> = rest
+    # IO.puts(Hexdump.to_string(index_block))
+
+    # logical indexes, index_num2 point to physical
+    indexes =
+      for <<
+        _::size(4)-bytes, # unknown
+        index_num::size(32)-unsigned-integer-little,
+        index_num2::size(32)-unsigned-integer-little,
+        rel_tbl_type::size(8)-unsigned-integer-little,
+        rel_idx_num::size(32)-unsigned-integer-little,
+        rel_tbl_page::size(32)-unsigned-integer-little,
+        cascade_ups::size(8)-unsigned-integer-little,
+        cascade_dels::size(8)-unsigned-integer-little,
+        index_type::size(8)-unsigned-integer-little <- index_block
+      >> do
+        [
+        index_num: index_num,
+        index_num2: index_num2,
+        rel_tbl_type: rel_tbl_type,
+        rel_idx_num: rel_idx_num,
+        rel_tbl_page: rel_tbl_page,
+        cascade_ups: cascade_ups,
+        cascade_dels: cascade_dels,
+        index_type: index_type,
+        primary: (index_type == 1),
+        foreign: (index_type == 2),
+        ]
+    end
+
+    # names of index length + name
+    index_names = parse_cols(4, rest, num_idx)
+    index_length = Enum.reduce(index_names, 0, &(&2 + elem(&1, 0) + 2))
+    <<_::size(index_length)-bytes, rest::binary>> = rest
+
+    indexes =
+      for {a, b} <- Enum.zip(indexes, index_names) do
+        a ++ [name: elem(b, 1)]
+      end
+
+    # IO.inspect(index_names)
+    # IO.puts(Hexdump.to_string(rest))
 
     # iterate if pages_col_num != 65535
-    # IO.inspect(rest)
-    # parsed_free_pages = parse_free_pages(rest)
-    parsed_free_pages = []
+    parsed_free_pages = parse_free_pages(rest)
+
+    # exit(:shutdown)
 
     [
       used_pages_page: used_pages_page,
       used_pages_row: used_pages_row,
       columns: columns,
+      real_indexes: real_indexes,
       indexes: indexes,
       free_pages: parsed_free_pages
     ]
