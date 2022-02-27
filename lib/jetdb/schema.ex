@@ -37,7 +37,7 @@ defmodule Jetdb.Schema do
     ]
 
     used_pages_map = used_pages_map(data_file, tdef[:used_pages_page])
-    rows = read_rows(data_file, tdef, used_pages_map)
+    rows = read_rows(data_file, used_pages_map, tdef[:columns])
 
     tables =
       Enum.filter(rows, &is_user_table(&1, column_positions))

@@ -114,54 +114,108 @@ defmodule Jetdb.Rows do
     end)
   end
 
+  defp row_offsets(read_page, data_file, offset) do
+    num_cols_bytes = if data_file.version == 3, do: 8, else: 16
+    var_len_size = if data_file.version == 3, do: 1, else: 2
+
+    length = Enum.at(offset, 3)
+    skip_bytes = Enum.at(offset, 0)
+    row_data = binary_part(read_page, skip_bytes, length - skip_bytes)
+
+    <<_::size(skip_bytes)-bytes, num_cols_in_row::size(num_cols_bytes)-unsigned-integer-little,
+      _::binary>> = read_page
+
+    null_mask_size = div(num_cols_in_row + 7, 8)
+
+    <<var_len::size(num_cols_bytes)-unsigned-integer-little>> =
+      binary_part(row_data, byte_size(row_data) - null_mask_size - var_len_size, var_len_size)
+
+    var_table =
+      binary_part(
+        row_data,
+        byte_size(row_data) - null_mask_size - var_len * var_len_size - var_len_size * 2,
+        var_len * var_len_size + var_len_size
+      )
+
+    var_offset_map =
+      for(<<offset::size(num_cols_bytes)-unsigned-integer-little <- var_table>>, do: offset)
+      |> Enum.reverse()
+
+    {var_len_size, var_offset_map, row_data}
+  end
+
+  defp row_columns(data_file, row_data, columns, var_len_size, var_offset_map) do
+    Enum.map(columns, fn column ->
+      if column[:is_fixed] do
+        start = column[:offset_f] + var_len_size
+        parse_column(data_file, start, row_data, column, column[:length])
+      else
+        var_offset = Enum.at(var_offset_map, column[:offset_v])
+        next_offset = Enum.at(var_offset_map, column[:offset_v] + 1)
+        size = if next_offset, do: next_offset - var_offset, else: 0
+        if size > 0 do
+          parse_column(data_file, var_offset, row_data, column, size)
+        else
+          ""
+        end
+      end
+    end)
+  end
+
   defp parse_row(data_file, pagenumber, columns) do
     read_page = Enum.at(data_file, pagenumber)
     offset_map = parse_offset_map(data_file.version, read_page)
     {_, offsets} = map_offsets(offset_map, data_file)
 
-    Enum.map(Enum.filter(Enum.reverse(offsets), &(Enum.at(&1, 2) == 0)), fn offset ->
-      num_cols_bytes = if data_file.version == 3, do: 8, else: 16
-      var_len_size = if data_file.version == 3, do: 1, else: 2
-
-      length = Enum.at(offset, 3)
-      skip_bytes = Enum.at(offset, 0)
-      row_data = binary_part(read_page, skip_bytes, length - skip_bytes)
-
-      <<_::size(skip_bytes)-bytes, num_cols_in_row::size(num_cols_bytes)-unsigned-integer-little,
-        _::binary>> = read_page
-
-      null_mask_size = div(num_cols_in_row + 7, 8)
-
-      <<var_len::size(num_cols_bytes)-unsigned-integer-little>> =
-        binary_part(row_data, byte_size(row_data) - null_mask_size - var_len_size, var_len_size)
-
-      var_table =
-        binary_part(
-          row_data,
-          byte_size(row_data) - null_mask_size - var_len * var_len_size - var_len_size * 2,
-          var_len * var_len_size + var_len_size
-        )
-
-      var_offset_map =
-        for(<<offset::size(num_cols_bytes)-unsigned-integer-little <- var_table>>, do: offset)
-        |> Enum.reverse()
-
-      Enum.with_index(columns, fn column, _i ->
-        if column[:is_fixed] do
-          start = column[:offset_f] + var_len_size
-          parse_column(data_file, start, row_data, column, column[:length])
-        else
-          var_offset = Enum.at(var_offset_map, column[:offset_v])
-          next_offset = Enum.at(var_offset_map, column[:offset_v] + 1)
-          size = if next_offset, do: next_offset - var_offset, else: 0
-          if size > 0, do: parse_column(data_file, var_offset, row_data, column, size), else: ""
-        end
-      end)
+    Enum.reverse(offsets)
+    |> Enum.filter(&(Enum.at(&1, 2) == 0))
+    |> Enum.map(fn offset ->
+      {var_len_size, var_offset_map, row_data} = row_offsets(read_page, data_file, offset)
+      row_columns(data_file, row_data, columns, var_len_size, var_offset_map)
     end)
     |> Enum.filter(&(!is_nil(&1)))
   end
 
-  def read_rows(data_file, tdef, used_pages_map) do
-    Enum.flat_map(used_pages_map, &parse_row(data_file, &1, tdef[:columns]))
+  defp parse_row_with_index(data_file, pagenumber, columns) do
+    read_page = Enum.at(data_file, pagenumber)
+    offset_map = parse_offset_map(data_file.version, read_page)
+    {_, offsets} = map_offsets(offset_map, data_file)
+
+    Enum.reverse(offsets)
+    |> Enum.filter(&(Enum.at(&1, 2) == 0))
+    |> Enum.with_index()
+    |> Enum.map(fn {offset, row} ->
+      {var_len_size, var_offset_map, row_data} = row_offsets(read_page, data_file, offset)
+      [pagenumber, row, row_columns(data_file, row_data, columns, var_len_size, var_offset_map)]
+    end)
+    |> Enum.filter(&(!is_nil(&1)))
+  end
+
+  defp parse_row_for_index(data_file, [pagenumber, rows], columns) do
+    read_page = Enum.at(data_file, pagenumber)
+    offset_map = parse_offset_map(data_file.version, read_page)
+    {_, offsets} = map_offsets(offset_map, data_file)
+
+    Enum.reverse(offsets)
+    |> Enum.filter(&(Enum.at(&1, 2) == 0))
+    |> Enum.with_index()
+    |> Enum.filter(fn {_offset, row} -> row in rows end)
+    |> Enum.map(fn {offset, _row} ->
+      {var_len_size, var_offset_map, row_data} = row_offsets(read_page, data_file, offset)
+      row_columns(data_file, row_data, columns, var_len_size, var_offset_map)
+    end)
+    |> Enum.filter(&(!is_nil(&1)))
+  end
+
+  def read_rows(data_file, used_pages_map, columns) do
+    Enum.flat_map(used_pages_map, &parse_row(data_file, &1, columns))
+  end
+
+  def read_rows_with_index(data_file, used_pages_map, columns) do
+    Enum.flat_map(used_pages_map, &parse_row_with_index(data_file, &1, columns))
+  end
+
+  def read_rows_for_index(data_file, row_map, columns) do
+    Enum.flat_map(row_map, &parse_row_for_index(data_file, &1, columns))
   end
 end
